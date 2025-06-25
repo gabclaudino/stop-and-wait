@@ -224,27 +224,32 @@ int enviar_com_ack(int sock, const Frame *frame, const uchar *dest_mac, int time
     return -1; // falha apos 5 tentativas
 }
 
-// recebe um frame e devolve ACK
-int receber_com_ack(int sock, Frame *frame, uchar *mac_origem, int timeout_ms)
-{
-    long long t0 = timestamp_ms();
-    while ((timestamp_ms() - t0) < timeout_ms)
-    {
-        if (receber_frame(sock, frame, NULL) == 0)
-        {
-            // extrai o MAC
+// recebe um frame e devolve ACK/NACK
+int receber_com_ack(int sock, Frame *frame, uchar *mac_origem, int timeout_ms) {
+    long long inicio = timestamp_ms();
+    while (timestamp_ms() - inicio < timeout_ms) {
+        int ret = receber_frame(sock, frame, NULL);
+        if (ret == 0) {
+            // extrai MAC de origem
             struct ether_header *eth = (struct ether_header *)frame->dados;
             uchar mac[6];
             memcpy(mac, eth->ether_shost, 6);
 
-            // envia ACK de volta
+            // envia ACK de volta (tipo 0)
             Frame ack = criar_frame(frame->sequencia, 0, NULL, 0);
             enviar_frame(sock, &ack, mac);
-
-            if (mac_origem)
-                memcpy(mac_origem, mac, 6);
+            if (mac_origem) memcpy(mac_origem, mac, 6);
             return 0;
         }
+        else if (ret == -2) {
+            // checksum invalido, envia NACK (tipo 1)
+            Frame nack = criar_frame(frame->sequencia, 1, NULL, 0);
+            struct ether_header *eth = (struct ether_header *)frame->dados;
+            uchar mac[6];
+            memcpy(mac, eth->ether_shost, 6);
+            enviar_frame(sock, &nack, mac);
+            // continua aguardando novo frame
+        }
     }
-    return -1; // timeout sem receber
+    return -1; // timeout sem receber nada valido
 }
